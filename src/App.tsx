@@ -600,6 +600,8 @@ function EssayGrader({ onSave, history, onDelete }: {
 }) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [answerKey, setAnswerKey] = useState('');
+  const [showAnswerKey, setShowAnswerKey] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EssayRecord | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -677,13 +679,12 @@ Hãy chấm điểm và nhận xét chi tiết bài văn sau:
 Tiêu đề: ${title}
 ${fullContent ? `Nội dung bài viết:\n${fullContent}` : ''}
 ${hasInlineFiles ? '\n(Bài làm của học sinh được đính kèm dưới dạng file ảnh/PDF. Hãy đọc và phân tích nội dung trong file.)' : ''}
+${answerKey.trim() ? `\n--- ĐÁP ÁN / BÀI MẪU CỦA GIÁO VIÊN ---\n${answerKey.trim()}\n--- HẾT ĐÁP ÁN ---\n\nHãy đối chiếu bài làm của học sinh với đáp án/bài mẫu ở trên. Đánh giá mức độ đầy đủ về ý, lập luận, dẫn chứng so với đáp án. Chỉ ra những ý học sinh đã đạt được và những ý còn thiếu.` : ''}
 
 Yêu cầu phản hồi theo định dạng Markdown với các mục:
 1. Điểm số (thang điểm 10)
 2. Nhận xét chung
-3. Ưu điểm (về bố cục, diễn đạt, sáng tạo)
-4. Hạn chế cần khắc phục
-5. Gợi ý sửa đổi chi tiết (đưa ra các câu văn mẫu hay hơn nếu cần)
+${answerKey.trim() ? '3. Đối chiếu với đáp án (những ý đã đạt, những ý còn thiếu, mức độ hoàn thành)\n4. Ưu điểm (về bố cục, diễn đạt, sáng tạo)\n5. Hạn chế cần khắc phục\n6. Gợi ý sửa đổi chi tiết (đưa ra các câu văn mẫu hay hơn nếu cần)' : '3. Ưu điểm (về bố cục, diễn đạt, sáng tạo)\n4. Hạn chế cần khắc phục\n5. Gợi ý sửa đổi chi tiết (đưa ra các câu văn mẫu hay hơn nếu cần)'}
 
 Hãy phản hồi một cách khích lệ nhưng vẫn đảm bảo tính chuyên môn cao.
       `.trim();
@@ -724,7 +725,7 @@ Hãy phản hồi một cách khích lệ nhưng vẫn đảm bảo tính chuyê
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Chấm bài luận</h2>
         <button
-          onClick={() => { setResult(null); setTitle(''); setContent(''); setUploadedFiles([]); }}
+          onClick={() => { setResult(null); setTitle(''); setContent(''); setAnswerKey(''); setUploadedFiles([]); }}
           className="flex items-center gap-2 text-primary font-medium hover:underline"
         >
           <Plus size={18} />
@@ -747,7 +748,7 @@ Hãy phản hồi một cách khích lệ nhưng vẫn đảm bảo tính chuyê
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nội dung bài viết</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nội dung bài viết của học sinh</label>
                 <textarea
                   rows={8}
                   value={content}
@@ -755,6 +756,42 @@ Hãy phản hồi một cách khích lệ nhưng vẫn đảm bảo tính chuyê
                   placeholder="Dán nội dung bài văn của học sinh vào đây..."
                   className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
                 />
+              </div>
+
+              {/* Teacher's Answer Key */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowAnswerKey(!showAnswerKey)}
+                  className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1 hover:text-primary transition-colors"
+                >
+                  <BookOpen size={14} />
+                  Đáp án / Bài mẫu của giáo viên
+                  <span className="text-slate-400 font-normal">(tuỳ chọn)</span>
+                  <ChevronRight size={14} className={cn("transition-transform", showAnswerKey && "rotate-90")} />
+                  {answerKey.trim() && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  )}
+                </button>
+                <AnimatePresence>
+                  {showAnswerKey && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <textarea
+                        rows={6}
+                        value={answerKey}
+                        onChange={(e) => setAnswerKey(e.target.value)}
+                        placeholder="Dán đáp án hoặc bài mẫu vào đây để AI đối chiếu với bài làm của học sinh..."
+                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none bg-amber-50/50 border-amber-200/50"
+                      />
+                      <p className="text-xs text-slate-400 mt-1">AI sẽ đối chiếu bài làm với đáp án để đánh giá mức độ đầy đủ về ý và cho điểm chính xác hơn.</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* File Upload Zone */}
