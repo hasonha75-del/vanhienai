@@ -23,7 +23,11 @@ import {
   ExternalLink,
   Zap,
   Brain,
-  Shield
+  Shield,
+  Paperclip,
+  ImageIcon,
+  FileType,
+  XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import dayjs from 'dayjs';
@@ -31,8 +35,9 @@ import Markdown from 'react-markdown';
 import Swal from 'sweetalert2';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { GeminiService } from './services/geminiService';
+import { GeminiService, FilePart } from './services/geminiService';
 import { EssayRecord, OutlineRecord, AnalysisRecord } from './types';
+import mammoth from 'mammoth';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -497,6 +502,95 @@ export default function App() {
   );
 }
 
+// --- File Upload Helpers ---
+
+interface UploadedFile {
+  name: string;
+  type: string; // 'image' | 'pdf' | 'docx'
+  mimeType: string;
+  base64?: string; // for images and PDFs
+  extractedText?: string; // for Word documents
+  previewUrl?: string; // for image previews
+  size: number;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function getFileTypeInfo(file: File): { type: string; icon: any; color: string } {
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(ext)) {
+    return { type: 'image', icon: ImageIcon, color: 'emerald' };
+  }
+  if (ext === 'pdf') {
+    return { type: 'pdf', icon: FileType, color: 'red' };
+  }
+  if (['doc', 'docx'].includes(ext)) {
+    return { type: 'docx', icon: FileText, color: 'blue' };
+  }
+  return { type: 'unknown', icon: Paperclip, color: 'slate' };
+}
+
+async function processFile(file: File): Promise<UploadedFile> {
+  const { type } = getFileTypeInfo(file);
+
+  if (type === 'image') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve({
+          name: file.name,
+          type: 'image',
+          mimeType: file.type || 'image/jpeg',
+          base64,
+          previewUrl: result,
+          size: file.size,
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (type === 'pdf') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve({
+          name: file.name,
+          type: 'pdf',
+          mimeType: 'application/pdf',
+          base64,
+          size: file.size,
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (type === 'docx') {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return {
+      name: file.name,
+      type: 'docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      extractedText: result.value,
+      size: file.size,
+    };
+  }
+
+  throw new Error(`Định dạng file "${file.name}" không được hỗ trợ.`);
+}
+
 // --- Feature Components ---
 
 function EssayGrader({ onSave, history, onDelete }: {
@@ -508,42 +602,105 @@ function EssayGrader({ onSave, history, onDelete }: {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EssayRecord | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [fileProcessing, setFileProcessing] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.webp,.gif,.bmp,.pdf,.doc,.docx';
+  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+
+  const handleFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setFileProcessing(true);
+    try {
+      const newFiles: UploadedFile[] = [];
+      for (const file of Array.from(fileList)) {
+        if (file.size > MAX_FILE_SIZE) {
+          Swal.fire('File quá lớn', `"${file.name}" vượt quá 20MB.`, 'warning');
+          continue;
+        }
+        try {
+          const processed = await processFile(file);
+          newFiles.push(processed);
+        } catch (err: any) {
+          Swal.fire('Lỗi', err.message, 'error');
+        }
+      }
+      setUploadedFiles(prev => [...prev, ...newFiles]);
+    } finally {
+      setFileProcessing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    handleFiles(e.dataTransfer.files);
+  };
 
   const handleGrade = async () => {
-    if (!title || !content) {
-      Swal.fire('Thiếu thông tin', 'Vui lòng nhập tiêu đề và nội dung bài văn.', 'warning');
+    const hasContent = content.trim().length > 0;
+    const hasFiles = uploadedFiles.length > 0;
+
+    if (!title || (!hasContent && !hasFiles)) {
+      Swal.fire('Thiếu thông tin', 'Vui lòng nhập tiêu đề và nội dung bài văn hoặc tải file bài làm.', 'warning');
       return;
     }
 
     setLoading(true);
     try {
-      const prompt = `
-        Hãy đóng vai một giáo viên Ngữ văn giàu kinh nghiệm tại Việt Nam. 
-        Hãy chấm điểm và nhận xét chi tiết bài văn sau:
-        
-        Tiêu đề: ${title}
-        Nội dung: ${content}
-        
-        Yêu cầu phản hồi theo định dạng Markdown với các mục:
-        1. Điểm số (thang điểm 10)
-        2. Nhận xét chung
-        3. Ưu điểm (về bố cục, diễn đạt, sáng tạo)
-        4. Hạn chế cần khắc phục
-        5. Gợi ý sửa đổi chi tiết (đưa ra các câu văn mẫu hay hơn nếu cần)
-        
-        Hãy phản hồi một cách khích lệ nhưng vẫn đảm bảo tính chuyên môn cao.
-      `;
+      // Build text content from typed text + extracted Word text
+      let fullContent = content;
+      const docxFiles = uploadedFiles.filter(f => f.type === 'docx' && f.extractedText);
+      if (docxFiles.length > 0) {
+        const docTexts = docxFiles.map(f => `[Nội dung từ file "${f.name}"]:\n${f.extractedText}`).join('\n\n');
+        fullContent = fullContent ? `${fullContent}\n\n${docTexts}` : docTexts;
+      }
 
-      const feedback = await GeminiService.generateContent(prompt, "Bạn là một trợ lý giáo dục chuyên về Ngữ văn Việt Nam.");
+      // Build file parts for Gemini (images + PDFs)
+      const fileParts: FilePart[] = uploadedFiles
+        .filter(f => (f.type === 'image' || f.type === 'pdf') && f.base64)
+        .map(f => ({ mimeType: f.mimeType, base64Data: f.base64! }));
+
+      const hasInlineFiles = fileParts.length > 0;
+
+      const prompt = `
+Hãy đóng vai một giáo viên Ngữ văn giàu kinh nghiệm tại Việt Nam.
+Hãy chấm điểm và nhận xét chi tiết bài văn sau:
+
+Tiêu đề: ${title}
+${fullContent ? `Nội dung bài viết:\n${fullContent}` : ''}
+${hasInlineFiles ? '\n(Bài làm của học sinh được đính kèm dưới dạng file ảnh/PDF. Hãy đọc và phân tích nội dung trong file.)' : ''}
+
+Yêu cầu phản hồi theo định dạng Markdown với các mục:
+1. Điểm số (thang điểm 10)
+2. Nhận xét chung
+3. Ưu điểm (về bố cục, diễn đạt, sáng tạo)
+4. Hạn chế cần khắc phục
+5. Gợi ý sửa đổi chi tiết (đưa ra các câu văn mẫu hay hơn nếu cần)
+
+Hãy phản hồi một cách khích lệ nhưng vẫn đảm bảo tính chuyên môn cao.
+      `.trim();
+
+      const feedback = await GeminiService.generateContent(
+        prompt,
+        "Bạn là một trợ lý giáo dục chuyên về Ngữ văn Việt Nam.",
+        hasInlineFiles ? fileParts : undefined
+      );
       if (feedback) {
-        // Extract score using regex
         const scoreMatch = feedback.match(/Điểm số:?\s*(\d+(\.\d+)?)/i);
         const score = scoreMatch ? parseFloat(scoreMatch[1]) : 7.5;
 
         const newEssay: EssayRecord = {
           id: Date.now().toString(),
           title,
-          content,
+          content: fullContent || `[Bài làm từ file: ${uploadedFiles.map(f => f.name).join(', ')}]`,
           feedback,
           score,
           date: new Date().toISOString()
@@ -567,7 +724,7 @@ function EssayGrader({ onSave, history, onDelete }: {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Chấm bài luận</h2>
         <button
-          onClick={() => { setResult(null); setTitle(''); setContent(''); }}
+          onClick={() => { setResult(null); setTitle(''); setContent(''); setUploadedFiles([]); }}
           className="flex items-center gap-2 text-primary font-medium hover:underline"
         >
           <Plus size={18} />
@@ -592,13 +749,104 @@ function EssayGrader({ onSave, history, onDelete }: {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nội dung bài viết</label>
                 <textarea
-                  rows={12}
+                  rows={8}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   placeholder="Dán nội dung bài văn của học sinh vào đây..."
                   className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
                 />
               </div>
+
+              {/* File Upload Zone */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Paperclip size={14} />
+                  Tải file bài làm <span className="text-slate-400 font-normal">(tuỳ chọn)</span>
+                </label>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    "relative border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all",
+                    isDragging
+                      ? "border-primary bg-primary/5 scale-[1.01]"
+                      : "border-slate-200 hover:border-primary/40 hover:bg-slate-50"
+                  )}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={ACCEPTED_TYPES}
+                    multiple
+                    onChange={(e) => handleFiles(e.target.files)}
+                    className="hidden"
+                  />
+                  <div className="flex flex-col items-center gap-2">
+                    {fileProcessing ? (
+                      <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+                        <Upload size={20} className="text-slate-400" />
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-sm font-medium text-slate-600">
+                        {fileProcessing ? 'Đang xử lý...' : 'Kéo thả hoặc nhấn để tải file'}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Hỗ trợ: Ảnh (JPG, PNG, WebP), Word (DOC, DOCX), PDF — Tối đa 20MB
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Uploaded files list */}
+                {uploadedFiles.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {uploadedFiles.map((file, idx) => {
+                      const colorMap: Record<string, string> = {
+                        image: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+                        pdf: 'bg-red-50 text-red-600 border-red-100',
+                        docx: 'bg-blue-50 text-blue-600 border-blue-100',
+                      };
+                      const badgeColor = colorMap[file.type] || 'bg-slate-50 text-slate-600 border-slate-100';
+                      return (
+                        <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 group">
+                          {/* Image preview */}
+                          {file.previewUrl ? (
+                            <img src={file.previewUrl} alt={file.name} className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
+                          ) : (
+                            <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center border", badgeColor)}>
+                              {file.type === 'pdf' ? <FileType size={18} /> : <FileText size={18} />}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate text-slate-700">{file.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className={cn("text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border", badgeColor)}>
+                                {file.type === 'image' ? 'Ảnh' : file.type === 'pdf' ? 'PDF' : 'Word'}
+                              </span>
+                              <span className="text-xs text-slate-400">{formatFileSize(file.size)}</span>
+                              {file.type === 'docx' && file.extractedText && (
+                                <span className="text-xs text-emerald-500">✓ Đã trích xuất văn bản</span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                            className="p-1.5 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            <XCircle size={18} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={handleGrade}
                 disabled={loading}
@@ -670,7 +918,7 @@ function EssayGrader({ onSave, history, onDelete }: {
                 <PenTool size={32} className="opacity-20" />
               </div>
               <h3 className="font-medium text-slate-600 mb-1">Chưa có kết quả</h3>
-              <p className="text-sm max-w-xs">Nhập nội dung bài văn và nhấn "Bắt đầu chấm bài" để xem nhận xét từ AI.</p>
+              <p className="text-sm max-w-xs">Nhập nội dung bài văn hoặc tải file bài làm, sau đó nhấn "Bắt đầu chấm bài" để xem nhận xét từ AI.</p>
             </div>
           )}
         </div>
