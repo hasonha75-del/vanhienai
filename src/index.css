@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --color-primary: #4A90E2;
+  --color-secondary: #FF9500;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans;
+  }
+}
+
+.gradient-bg {
+  background: linear-gradient(135deg, #4A90E2 0%, #7B68EE 50%, #FF9500 100%);
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Markdown body */
+.markdown-body h1 { @apply text-2xl font-bold mb-4 text-slate-800; }
+.markdown-body h2 { @apply text-xl font-bold mb-3 mt-6 text-slate-700; }
+.markdown-body h3 { @apply text-lg font-bold mb-2 mt-4 text-slate-700; }
+.markdown-body p { @apply mb-4 leading-relaxed text-slate-600; }
+.markdown-body ul { @apply list-disc pl-6 mb-4; }
+.markdown-body ol { @apply list-decimal pl-6 mb-4; }
+.markdown-body li { @apply mb-1.5 text-slate-600; }
+.markdown-body blockquote { @apply border-l-4 border-primary/30 pl-4 italic my-4 text-slate-500 bg-slate-50 py-2 rounded-r-lg; }
+.markdown-body strong { @apply text-slate-800; }
+.markdown-body code { @apply bg-slate-100 text-primary px-1.5 py-0.5 rounded text-sm font-mono; }
+.markdown-body pre { @apply bg-slate-800 text-slate-100 p-4 rounded-xl mb-4 overflow-x-auto; }
+.markdown-body pre code { @apply bg-transparent text-slate-100 px-0 py-0; }
